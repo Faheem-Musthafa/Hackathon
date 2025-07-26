@@ -96,6 +96,51 @@ export const MapView = () => {
 
   useEffect(() => {
     fetchReports();
+
+    // Set up real-time subscription for new reports
+    const subscription = supabase
+      .channel('reports_changes')
+      .on('postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'reports',
+          filter: 'status=eq.active'
+        },
+        (payload) => {
+          console.log('Real-time update:', payload);
+
+          if (payload.eventType === 'INSERT') {
+            const newReport = payload.new as Report;
+            // Only add if it has location data
+            if (newReport.latitude && newReport.longitude) {
+              setReports(prev => [newReport, ...prev]);
+              toast({
+                title: "New report added",
+                description: `${newReport.title} - ${newReport.location}`,
+              });
+            }
+          } else if (payload.eventType === 'UPDATE') {
+            const updatedReport = payload.new as Report;
+            setReports(prev =>
+              prev.map(report =>
+                report.id === updatedReport.id ? updatedReport : report
+              )
+            );
+          } else if (payload.eventType === 'DELETE') {
+            const deletedReport = payload.old as Report;
+            setReports(prev =>
+              prev.filter(report => report.id !== deletedReport.id)
+            );
+          }
+        }
+      )
+      .subscribe();
+
+    // Cleanup subscription on unmount
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [fetchReports]);
 
   const getSeverityBgColor = (severity: string) => {

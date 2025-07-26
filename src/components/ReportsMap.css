@@ -1,0 +1,215 @@
+/* Custom styles for the Reports Map */
+
+/* Cluster icon styles */
+.custom-cluster-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+.custom-cluster-icon div {
+  transition: all 0.2s ease;
+}
+
+.custom-cluster-icon:hover div {
+  transform: scale(1.1);
+}
+
+/* Custom marker styles */
+.custom-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+.custom-marker div {
+  transition: all 0.2s ease;
+}
+
+.custom-marker:hover div {
+  transform: scale(1.2);
+}
+
+/* Popup styles */
+.custom-popup .leaflet-popup-content-wrapper {
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+}
+
+.custom-popup .leaflet-popup-content {
+  margin: 0;
+  padding: 0;
+}
+
+.custom-popup .leaflet-popup-tip {
+  background: white;
+}
+
+/* Map legend styles */
+.map-legend {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  font-size: 12px;
+}
+
+.map-legend h4 {
+  margin: 0 0 8px 0;
+  font-weight: 600;
+  color: #374151;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.legend-item:last-child {
+  margin-bottom: 0;
+}
+
+.legend-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-right: 8px;
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.legend-color.high {
+  background-color: #ef4444;
+}
+
+.legend-color.medium {
+  background-color: #f59e0b;
+}
+
+.legend-color.low {
+  background-color: #10b981;
+}
+
+/* Loading and error states */
+.map-loading {
+  background: linear-gradient(45deg, #f3f4f6, #e5e7eb);
+  background-size: 20px 20px;
+  animation: loading-shimmer 1.5s infinite;
+}
+
+@keyframes loading-shimmer {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 20px 20px;
+  }
+}
+
+/* Mobile optimizations */
+.leaflet-container {
+  touch-action: pan-x pan-y;
+}
+
+/* Improve touch targets on mobile */
+.leaflet-control-zoom a {
+  width: 44px !important;
+  height: 44px !important;
+  line-height: 44px !important;
+  font-size: 18px !important;
+}
+
+.leaflet-popup-close-button {
+  width: 32px !important;
+  height: 32px !important;
+  font-size: 18px !important;
+  line-height: 32px !important;
+}
+
+/* Enhanced cluster icons for mobile */
+.custom-cluster-icon div {
+  min-width: 32px;
+  min-height: 32px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Enhanced marker icons for mobile */
+.custom-marker div {
+  min-width: 28px;
+  min-height: 28px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .map-legend {
+    bottom: 10px;
+    right: 10px;
+    font-size: 11px;
+    padding: 8px;
+    max-width: 120px;
+  }
+
+  .legend-color {
+    width: 10px;
+    height: 10px;
+    margin-right: 6px;
+  }
+
+  /* Make popups more mobile-friendly */
+  .leaflet-popup-content-wrapper {
+    max-width: 280px !important;
+  }
+
+  .leaflet-popup-content {
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  /* Adjust cluster sizes for mobile */
+  .custom-cluster-icon div {
+    min-width: 36px;
+    min-height: 36px;
+    font-size: 12px;
+  }
+
+  /* Larger touch targets for markers */
+  .custom-marker div {
+    min-width: 32px;
+    min-height: 32px;
+  }
+}
+
+@media (max-width: 480px) {
+  .map-legend {
+    bottom: 8px;
+    right: 8px;
+    font-size: 10px;
+    padding: 6px;
+    max-width: 100px;
+  }
+
+  .legend-item {
+    margin-bottom: 2px;
+  }
+
+  .legend-color {
+    width: 8px;
+    height: 8px;
+    margin-right: 4px;
+  }
+
+  /* Even more compact popups for small screens */
+  .leaflet-popup-content-wrapper {
+    max-width: 240px !important;
+  }
+
+  .leaflet-popup-content {
+    font-size: 13px;
+    padding: 8px;
+  }
+}
