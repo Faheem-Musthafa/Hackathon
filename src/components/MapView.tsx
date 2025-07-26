@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { MapPin, Navigation, Loader2, RefreshCw, Calendar, AlertTriangle, Globe } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { getCategoryIcon, getSeverityColor, getCategoryColor, formatDate, calculateDistance, openInMaps } from "@/lib/utils";
+import { ReportsMap } from "./ReportsMap";
 
 interface Report {
   id: string;
@@ -160,7 +161,7 @@ export const MapView = () => {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Map Placeholder */}
+          {/* Map Integration */}
           <div className="lg:col-span-1">
             <Card className="h-[600px] overflow-hidden shadow-xl border-0 bg-card/95 backdrop-blur-sm">
               <CardHeader className="pb-3">
@@ -170,24 +171,11 @@ export const MapView = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="h-[calc(100%-56px)] p-0 relative">
-                <div className="w-full h-full bg-gradient-to-br from-blue-50 to-indigo-100 rounded-b-lg flex items-center justify-center">
-                  <div className="text-center">
-                    <Globe className="w-16 h-16 text-blue-400 mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold text-gray-700 mb-2">Map Integration</h3>
-                    <p className="text-gray-600 mb-4 max-w-md">
-                      Interactive map view is being enhanced. For now, use the "Navigate" buttons to open locations in Google Maps.
-                    </p>
-                    <div className="flex items-center justify-center space-x-2 text-sm text-gray-500">
-                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                      <span>Reports with location data: {reports.length}</span>
-                    </div>
-                  </div>
-                </div>
+                <ReportsMap reports={reports} />
               </CardContent>
             </Card>
           </div>
-          
-          {/* Reports List */}
+          {/* Reports List (unchanged) */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold">Reports with Location</h2>
@@ -195,14 +183,12 @@ export const MapView = () => {
                 {reports.length} reports
               </Badge>
             </div>
-            
             <div className="max-h-[600px] overflow-y-auto space-y-3 pr-2">
               {reports.length > 0 ? (
                 reports.map((report) => {
                   const distance = userLocation && report.latitude && report.longitude
                     ? calculateDistance(userLocation.lat, userLocation.lng, report.latitude, report.longitude)
                     : null;
-                  
                   return (
                     <Card 
                       key={report.id} 
@@ -246,11 +232,9 @@ export const MapView = () => {
                             </div>
                           )}
                         </div>
-                        
                         <p className="text-sm text-gray-600 mb-3 line-clamp-2">
                           {report.description}
                         </p>
-                        
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-1 text-gray-500">
                             <MapPin className="w-4 h-4" />
@@ -289,8 +273,7 @@ export const MapView = () => {
             </div>
           </div>
         </div>
-        
-        {/* Selected Report Details */}
+        {/* Selected Report Details (unchanged) */}
         {selectedReport && (
           <Card className="mt-6 border-t-4 border-t-primary shadow-xl">
             <CardHeader>
@@ -313,18 +296,15 @@ export const MapView = () => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="md:col-span-2">
                   <p className="text-gray-700 mb-4">{selectedReport.description}</p>
-                  
                   <div className="flex items-center text-gray-600 mb-2">
                     <MapPin className="w-4 h-4 mr-2 flex-shrink-0" />
                     <span>{selectedReport.location}</span>
                   </div>
-                  
                   <div className="flex items-center text-gray-600">
                     <Calendar className="w-4 h-4 mr-2 flex-shrink-0" />
                     <span>Reported on {formatDate(selectedReport.created_at)}</span>
                   </div>
                 </div>
-                
                 <div className="flex flex-col items-start">
                   {selectedReport.latitude && selectedReport.longitude && (
                     <Button
@@ -335,7 +315,6 @@ export const MapView = () => {
                       Open in Maps
                     </Button>
                   )}
-                  
                   <div className="w-full bg-gray-100 rounded-lg p-4">
                     <h4 className="font-medium text-gray-900 mb-2">Report Details</h4>
                     <div className="space-y-2 text-sm">
