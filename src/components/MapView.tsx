@@ -1,23 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
-import { MapPin, Navigation, Loader2, RefreshCw, Calendar, AlertTriangle } from "lucide-react";
+import { MapPin, Navigation, Loader2, RefreshCw, Calendar, AlertTriangle, Globe } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
-// Leaflet imports
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import markerIcon from 'leaflet/dist/images/marker-icon.png';
-import markerShadow from 'leaflet/dist/images/marker-shadow.png';
-
-// Fix for default marker icons in Leaflet
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: markerIcon,
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow,
-});
+import { getCategoryIcon, getSeverityColor, getCategoryColor, formatDate, calculateDistance, openInMaps } from "@/lib/utils";
 
 interface Report {
   id: string;
@@ -36,19 +24,19 @@ export const MapView = () => {
   const [loading, setLoading] = useState(true);
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const markersRef = useRef<L.Marker[]>([]);
-  const userMarkerRef = useRef<L.Marker | null>(null);
+  const [locationLoading, setLocationLoading] = useState(false);
 
   const fetchReports = useCallback(async () => {
     try {
+      setLoading(true);
       const { data, error } = await supabase
         .from('reports')
         .select('*')
+        .eq('status', 'active')
         .not('latitude', 'is', null)
         .not('longitude', 'is', null)
         .order('created_at', { ascending: false });
+      
       if (error) throw error;
       setReports(data || []);
     } catch (error) {
@@ -64,139 +52,50 @@ export const MapView = () => {
   }, []);
 
   const getUserLocation = useCallback(async () => {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      toast({
+        title: "Location not supported",
+        description: "Your browser doesn't support location services.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setLocationLoading(true);
     try {
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject);
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 60000
+        });
       });
+      
       const userLoc = {
         lat: position.coords.latitude,
         lng: position.coords.longitude
       };
       setUserLocation(userLoc);
+      
+      toast({
+        title: "Location detected",
+        description: "Your location has been set for distance calculations.",
+      });
     } catch (error) {
       console.error('Error getting user location:', error);
+      toast({
+        title: "Location access denied",
+        description: "Please enable location services to see distances to reports.",
+        variant: "destructive",
+      });
+    } finally {
+      setLocationLoading(false);
     }
   }, []);
 
   useEffect(() => {
     fetchReports();
-    getUserLocation();
-  }, [fetchReports, getUserLocation]);
-
-  // Initialize map
-  useEffect(() => {
-    if (!mapContainerRef.current || !reports.length) return;
-
-    // Clean up existing map
-    if (mapRef.current) {
-      mapRef.current.remove();
-    }
-
-    // Initialize map
-    const map = L.map(mapContainerRef.current).setView(
-      userLocation ? [userLocation.lat, userLocation.lng] : [37.7749, -122.4194],
-      userLocation ? 13 : 10
-    );
-
-    // Add tile layer
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(map);
-
-    mapRef.current = map;
-
-    // Add user location marker
-    if (userLocation) {
-      const userIcon = L.divIcon({
-        className: 'user-marker',
-        html: `<div class="w-6 h-6 bg-blue-600 rounded-full border-2 border-white shadow-lg flex items-center justify-center">
-          <div class="w-2 h-2 bg-white rounded-full"></div>
-        </div>`,
-        iconSize: [24, 24],
-        iconAnchor: [12, 12]
-      });
-
-      const userMarker = L.marker([userLocation.lat, userLocation.lng], {
-        icon: userIcon,
-        zIndexOffset: 1000
-      }).addTo(map).bindPopup('Your Location');
-      
-      userMarkerRef.current = userMarker;
-    }
-
-    // Add report markers
-    const addMarkers = () => {
-      // Clear existing markers
-      markersRef.current.forEach(marker => map.removeLayer(marker));
-      markersRef.current = [];
-
-      reports.forEach(report => {
-        if (!report.latitude || !report.longitude) return;
-
-        // Create custom icon based on severity
-        const severityColor = getSeverityColor(report.severity);
-        const categoryIcon = getCategoryIcon(report.category);
-        
-        const icon = L.divIcon({
-          className: 'report-marker',
-          html: `
-            <div class="relative">
-              <div class="w-8 h-8 rounded-full ${severityColor} border-2 border-white shadow-lg flex items-center justify-center">
-                <span class="text-white text-sm">${categoryIcon}</span>
-              </div>
-              <div class="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-white"></div>
-            </div>
-          `,
-          iconSize: [32, 32],
-          iconAnchor: [16, 16]
-        });
-
-        const marker = L.marker([report.latitude, report.longitude], {
-          icon: icon
-        }).addTo(map);
-
-        // Add popup
-        marker.bindPopup(`
-          <div class="p-2">
-            <h3 class="font-bold">${report.title}</h3>
-            <p class="text-sm">${report.description.substring(0, 60)}${report.description.length > 60 ? '...' : ''}</p>
-            <div class="mt-2">
-              <span class="inline-block px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
-                ${report.severity}
-              </span>
-            </div>
-          </div>
-        `);
-
-        // Add click handler
-        marker.on('click', () => {
-          setSelectedReport(report);
-        });
-
-        markersRef.current.push(marker);
-      });
-    };
-
-    addMarkers();
-
-    // Clean up
-    return () => {
-      if (mapRef.current) {
-        mapRef.current.remove();
-      }
-    };
-  }, [reports, userLocation]);
-
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'critical': return 'bg-red-500';
-      case 'high': return 'bg-orange-500';
-      case 'medium': return 'bg-yellow-500';
-      case 'low': return 'bg-green-500';
-      default: return 'bg-gray-500';
-    }
-  };
+  }, [fetchReports]);
 
   const getSeverityBgColor = (severity: string) => {
     switch (severity) {
@@ -208,88 +107,49 @@ export const MapView = () => {
     }
   };
 
-  const getCategoryIcon = (category: string) => {
-    switch (category) {
-      case 'accident': return '🚗';
-      case 'construction': return '🚧';
-      case 'weather': return '🌧️';
-      case 'traffic': return '🚦';
-      case 'road_damage': return '🕳️';
-      default: return '⚠️';
-    }
-  };
-
-  const getCategoryColor = (category: string) => {
-    switch (category) {
-      case 'accident': return 'text-red-500';
-      case 'construction': return 'text-yellow-500';
-      case 'weather': return 'text-blue-500';
-      case 'traffic': return 'text-orange-500';
-      case 'road_damage': return 'text-purple-500';
-      default: return 'text-gray-500';
-    }
-  };
-
-  const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number) => {
-    const R = 6371; // Earth's radius in km
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLng = (lng2 - lng1) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLng/2) * Math.sin(dLng/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
-  };
-
-  const openInMaps = (lat: number, lng: number) => {
-    const url = `https://www.google.com/maps?q=${lat},${lng}`;
-    window.open(url, '_blank');
-  };
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  };
-
-  const centerOnUser = () => {
-    if (userLocation && mapRef.current) {
-      mapRef.current.setView([userLocation.lat, userLocation.lng], 14);
+  const refreshData = () => {
+    fetchReports();
+    if (!userLocation) {
+      getUserLocation();
     }
   };
 
   if (loading) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 py-8">
+        <div className="container mx-auto px-4">
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 py-8">
+      <div className="container mx-auto px-4 max-w-7xl">
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Interactive Map</h1>
-            <p className="text-gray-600 mt-2">View and manage reports on the map</p>
+            <h1 className="text-3xl font-bold">Reports Map View</h1>
+            <p className="text-muted-foreground mt-2">View reports with location data and get directions</p>
           </div>
           <div className="flex flex-wrap gap-3">
             <Button 
-              onClick={centerOnUser} 
+              onClick={getUserLocation} 
               variant="outline"
+              disabled={locationLoading}
               className="flex items-center gap-2"
             >
-              <Navigation className="w-4 h-4" />
-              My Location
+              {locationLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Navigation className="w-4 h-4" />
+              )}
+              {userLocation ? 'Update Location' : 'Get My Location'}
             </Button>
             <Button 
-              onClick={fetchReports} 
+              onClick={refreshData} 
               variant="outline"
               className="flex items-center gap-2"
             >
@@ -299,21 +159,30 @@ export const MapView = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Map Visualization */}
-          <div className="lg:col-span-2">
-            <Card className="h-[600px] overflow-hidden">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Map Placeholder */}
+          <div className="lg:col-span-1">
+            <Card className="h-[600px] overflow-hidden shadow-xl border-0 bg-card/95 backdrop-blur-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2">
-                  <MapPin className="w-5 h-5 text-primary" />
-                  Report Locations
+                  <Globe className="w-5 h-5 text-primary" />
+                  Interactive Map
                 </CardTitle>
               </CardHeader>
               <CardContent className="h-[calc(100%-56px)] p-0 relative">
-                <div 
-                  ref={mapContainerRef} 
-                  className="w-full h-full rounded-b-lg"
-                />
+                <div className="w-full h-full bg-gradient-to-br from-blue-50 to-indigo-100 rounded-b-lg flex items-center justify-center">
+                  <div className="text-center">
+                    <Globe className="w-16 h-16 text-blue-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-semibold text-gray-700 mb-2">Map Integration</h3>
+                    <p className="text-gray-600 mb-4 max-w-md">
+                      Interactive map view is being enhanced. For now, use the "Navigate" buttons to open locations in Google Maps.
+                    </p>
+                    <div className="flex items-center justify-center space-x-2 text-sm text-gray-500">
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span>Reports with location data: {reports.length}</span>
+                    </div>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -321,7 +190,7 @@ export const MapView = () => {
           {/* Reports List */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">Nearby Reports</h2>
+              <h2 className="text-xl font-semibold">Reports with Location</h2>
               <Badge variant="secondary" className="text-sm">
                 {reports.length} reports
               </Badge>
@@ -342,12 +211,7 @@ export const MapView = () => {
                           ? 'ring-2 ring-primary border-primary' 
                           : ''
                       } ${getSeverityBgColor(report.severity)}`}
-                      onClick={() => {
-                        setSelectedReport(report);
-                        if (report.latitude && report.longitude && mapRef.current) {
-                          mapRef.current.setView([report.latitude, report.longitude], 15);
-                        }
-                      }}
+                      onClick={() => setSelectedReport(report)}
                     >
                       <CardContent className="p-4">
                         <div className="flex items-start justify-between mb-2">
@@ -428,7 +292,7 @@ export const MapView = () => {
         
         {/* Selected Report Details */}
         {selectedReport && (
-          <Card className="mt-6 border-t-4 border-t-primary">
+          <Card className="mt-6 border-t-4 border-t-primary shadow-xl">
             <CardHeader>
               <CardTitle className="flex flex-wrap items-center gap-3">
                 <span className={`text-2xl ${getCategoryColor(selectedReport.category)}`}>
@@ -487,6 +351,22 @@ export const MapView = () => {
                         <span className="text-gray-600">Report ID:</span>
                         <span className="font-mono text-xs">{selectedReport.id.substring(0, 8)}</span>
                       </div>
+                      {userLocation && selectedReport.latitude && selectedReport.longitude && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Distance:</span>
+                          <span className="font-medium">
+                            {(() => {
+                              const distance = calculateDistance(
+                                userLocation.lat, 
+                                userLocation.lng, 
+                                selectedReport.latitude!, 
+                                selectedReport.longitude!
+                              );
+                              return distance < 1 ? `${Math.round(distance * 1000)}m` : `${distance.toFixed(1)}km`;
+                            })()}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

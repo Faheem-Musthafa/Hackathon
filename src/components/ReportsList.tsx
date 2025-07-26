@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -6,8 +6,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
-import { Clock, MapPin, AlertTriangle, Loader2, RefreshCw, Trash2, Search, Filter } from "lucide-react";
+import { Clock, MapPin, AlertTriangle, Loader2, RefreshCw, Trash2, Search, Filter, Trash, BarChart3 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { getCategoryIcon, getSeverityVariant, formatTimeAgo } from "@/lib/utils";
 
 interface Report {
   id: string;
@@ -21,7 +22,11 @@ interface Report {
   created_at: string;
 }
 
-export const ReportsList = () => {
+interface ReportsListProps {
+  onViewChange?: (view: 'home' | 'reports' | 'create' | 'search' | 'analytics' | 'map') => void;
+}
+
+export const ReportsList = ({ onViewChange }: ReportsListProps) => {
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('all');
@@ -30,6 +35,7 @@ export const ReportsList = () => {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [reportToDelete, setReportToDelete] = useState<Report | null>(null);
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
+  const [showClearAllDialog, setShowClearAllDialog] = useState(false);
 
   const fetchReports = useCallback(async () => {
     try {
@@ -85,15 +91,26 @@ export const ReportsList = () => {
         if (payload.eventType === 'DELETE') {
           setReports(prev => prev.filter(r => r.id !== payload.old.id));
         } else if (payload.eventType === 'INSERT') {
-          setReports(prev => [payload.new as Report, ...prev]);
-          toast({
-            title: 'New Report',
-            description: 'A new report has been added.',
-          });
+          const newReport = payload.new as Report;
+          // Only add if it's an active report
+          if (newReport.status === 'active') {
+            setReports(prev => [newReport, ...prev]);
+            toast({
+              title: 'New Report',
+              description: 'A new report has been added.',
+            });
+          }
         } else if (payload.eventType === 'UPDATE') {
-          setReports(prev => 
-            prev.map(r => r.id === payload.new.id ? { ...r, ...payload.new } : r)
-          );
+          const updatedReport = payload.new as Report;
+          // If the report status is no longer active, remove it from the list
+          if (updatedReport.status !== 'active') {
+            setReports(prev => prev.filter(r => r.id !== updatedReport.id));
+          } else {
+            // Update the report if it's still active
+            setReports(prev => 
+              prev.map(r => r.id === updatedReport.id ? { ...r, ...updatedReport } : r)
+            );
+          }
         }
       })
       .subscribe();
@@ -103,51 +120,19 @@ export const ReportsList = () => {
     };
   }, []);
 
-  const getSeverityVariant = (severity: string) => {
-    switch (severity.toLowerCase()) {
-      case 'critical': return 'destructive';
-      case 'high': return 'destructive';
-      case 'medium': return 'default';
-      case 'low': return 'secondary';
-      default: return 'secondary';
-    }
-  };
-
-  const getCategoryIcon = (category: string) => {
-    switch (category.toLowerCase()) {
-      case 'accident': return '🚗';
-      case 'construction': return '🚧';
-      case 'weather': return '🌧️';
-      case 'traffic': return '🚦';
-      case 'road_damage': return '🕳️';
-      default: return '⚠️';
-    }
-  };
-
-  const formatTimeAgo = (dateString: string) => {
-    const now = new Date();
-    const date = new Date(dateString);
-    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
-    
-    if (diffInMinutes < 1) return 'Just now';
-    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
-    return `${Math.floor(diffInMinutes / 1440)}d ago`;
-  };
-
-  const handleDeleteClick = (report: Report) => {
+  const handleDeleteClick = useCallback((report: Report) => {
     setReportToDelete(report);
     setShowDeleteDialog(true);
-  };
+  }, []);
 
-  const handleDeleteConfirm = async () => {
+  const handleDeleteConfirm = useCallback(async () => {
     if (!reportToDelete) return;
     const reportId = reportToDelete.id;
     setDeletingId(reportId);
     
     try {
       // Try hard delete first
-      let {error} = await supabase
+      const { error } = await supabase
         .from('reports')
         .delete()
         .eq('id', reportId);
@@ -162,6 +147,7 @@ export const ReportsList = () => {
         if (updateError) throw updateError;
       }
       
+      // Remove from local state immediately
       setReports(prev => prev.filter(r => r.id !== reportId));
       toast({
         title: "Report deleted",
@@ -179,16 +165,59 @@ export const ReportsList = () => {
       setShowDeleteDialog(false);
       setReportToDelete(null);
     }
-  };
+  }, [reportToDelete]);
 
-  const clearFilters = () => {
+  const handleClearAll = useCallback(async () => {
+    try {
+      // Clear all reports from local state
+      setReports([]);
+      toast({
+        title: "All reports cleared",
+        description: "All reports have been removed from the view.",
+      });
+    } catch (error) {
+      console.error('Error clearing reports:', error);
+      toast({
+        title: "Error clearing reports",
+        description: "Please try again later.",
+        variant: "destructive",
+      });
+    } finally {
+      setShowClearAllDialog(false);
+    }
+  }, []);
+
+  const handleViewAnalytics = useCallback(() => {
+    // Store current filter state in localStorage for analytics page
+    const filterState = {
+      category: filter,
+      searchTerm: searchTerm,
+      sortOrder: sortOrder,
+      reportCount: reports.length
+    };
+    localStorage.setItem('reportsFilterState', JSON.stringify(filterState));
+    
+    // Navigate to analytics
+    onViewChange?.('analytics');
+    
+    toast({
+      title: "Viewing Analytics",
+      description: `Analyzing ${reports.length} reports with current filters.`,
+    });
+  }, [filter, searchTerm, sortOrder, reports.length, onViewChange]);
+
+  const clearFilters = useCallback(() => {
     setFilter('all');
     setSearchTerm('');
     setSortOrder('newest');
-  };
+  }, []);
 
-  const filteredReportsCount = reports.length;
-  const totalReportsCount = reports.length;
+  const refreshReports = useCallback(() => {
+    fetchReports();
+  }, [fetchReports]);
+
+  const filteredReportsCount = useMemo(() => reports.length, [reports]);
+  const totalReportsCount = useMemo(() => reports.length, [reports]);
 
   if (loading) {
     return (
@@ -230,6 +259,26 @@ export const ReportsList = () => {
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog open={showClearAllDialog} onOpenChange={setShowClearAllDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear All Reports?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove all reports from the view. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleClearAll}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Clear All
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
@@ -247,6 +296,7 @@ export const ReportsList = () => {
                 className="pl-10 w-64"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
+                aria-label="Search reports"
               />
             </div>
             
@@ -281,12 +331,39 @@ export const ReportsList = () => {
             <Button
               variant="outline"
               size="sm"
-              onClick={fetchReports}
+              onClick={refreshReports}
               className="flex items-center"
+              aria-label="Refresh reports"
             >
               <RefreshCw className="w-4 h-4" />
               <span className="ml-2">Refresh</span>
             </Button>
+
+            {reports.length > 0 && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setShowClearAllDialog(true)}
+                className="flex items-center"
+                aria-label="Clear all reports"
+              >
+                <Trash className="w-4 h-4" />
+                <span className="ml-2">Clear All</span>
+              </Button>
+            )}
+
+            {reports.length > 0 && onViewChange && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleViewAnalytics}
+                className="flex items-center bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:from-blue-600 hover:to-purple-600"
+                aria-label="View analytics for current reports"
+              >
+                <BarChart3 className="w-4 h-4" />
+                <span className="ml-2">Analytics</span>
+              </Button>
+            )}
             
             {(filter !== 'all' || searchTerm || sortOrder !== 'newest') && (
               <Button
@@ -357,6 +434,7 @@ export const ReportsList = () => {
                       className="text-destructive hover:text-destructive/90 hover:bg-destructive/10 h-9 px-3"
                       onClick={() => handleDeleteClick(report)}
                       disabled={deletingId === report.id}
+                      aria-label={`Delete report: ${report.title}`}
                     >
                       {deletingId === report.id ? (
                         <Loader2 className="w-4 h-4 animate-spin" />

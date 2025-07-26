@@ -20,6 +20,12 @@ export const Analytics = () => {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('30d');
+  const [filterState, setFilterState] = useState<{
+    category: string;
+    searchTerm: string;
+    sortOrder: string;
+    reportCount: number;
+  } | null>(null);
 
   const fetchAnalytics = useCallback(async () => {
     setLoading(true);
@@ -103,6 +109,21 @@ export const Analytics = () => {
     fetchAnalytics();
   }, [fetchAnalytics]);
 
+  // Read filter state from localStorage when component mounts
+  useEffect(() => {
+    try {
+      const storedFilterState = localStorage.getItem('reportsFilterState');
+      if (storedFilterState) {
+        const parsedState = JSON.parse(storedFilterState);
+        setFilterState(parsedState);
+        // Clear the stored state after reading it
+        localStorage.removeItem('reportsFilterState');
+      }
+    } catch (error) {
+      console.error('Error reading filter state:', error);
+    }
+  }, []);
+
   const getCategoryIcon = (category: string) => {
     switch (category) {
       case 'accident': return '🚗';
@@ -160,6 +181,47 @@ export const Analytics = () => {
             </Button>
           </div>
         </div>
+
+        {/* Filter State Display */}
+        {filterState && (
+          <Card className="mb-6 border-l-4 border-l-blue-500 bg-blue-50/50">
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-blue-900 mb-2">
+                    📊 Analyzing Filtered Reports
+                  </h3>
+                  <div className="flex flex-wrap gap-4 text-sm text-blue-800">
+                    {filterState.category !== 'all' && (
+                      <Badge variant="outline" className="bg-blue-100">
+                        Category: {filterState.category.replace('_', ' ')}
+                      </Badge>
+                    )}
+                    {filterState.searchTerm && (
+                      <Badge variant="outline" className="bg-blue-100">
+                        Search: "{filterState.searchTerm}"
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="bg-blue-100">
+                      Sort: {filterState.sortOrder === 'newest' ? 'Newest First' : 'Oldest First'}
+                    </Badge>
+                    <Badge variant="outline" className="bg-blue-100">
+                      Reports: {filterState.reportCount}
+                    </Badge>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-blue-600">
+                    Filtered from Reports List
+                  </p>
+                  <p className="text-xs text-blue-500">
+                    {new Date().toLocaleTimeString()}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Key Metrics */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">

@@ -14,7 +14,7 @@ interface Report {
   severity: string;
   category: string;
   created_at: string;
-  [key: string]: any; // For any additional fields
+  [key: string]: unknown; // For any additional fields
 }
 
 interface Notification {
@@ -96,7 +96,7 @@ export const NotificationCenter = ({ isOpen, onClose }: NotificationCenterProps)
     return () => {
       isMounted = false;
     };
-  }, [toast]);
+  }, []);
 
   useEffect(() => {
     if (isOpen) {

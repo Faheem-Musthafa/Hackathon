@@ -1,27 +1,26 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { toast } from "@/hooks/use-toast";
+import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { MapPin, AlertTriangle, Loader2, CheckCircle, ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { Loader2, MapPin } from "lucide-react";
-import { z } from "zod";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { toast } from "@/hooks/use-toast";
 
 const reportSchema = z.object({
   title: z.string().min(5, "Title must be at least 5 characters"),
   description: z.string().min(10, "Description must be at least 10 characters"),
   location: z.string().min(3, "Location is required"),
-  category: z.enum(["accident", "construction", "weather", "traffic", "road_damage", "other"]),
-  severity: z.enum(["low", "medium", "high", "critical"]),
-  reporter_name: z.string().optional(),
-  reporter_email: z.string().email("Invalid email address").optional().or(z.literal("")),
-  latitude: z.number().optional(),
-  longitude: z.number().optional()
+  category: z.string().min(1, "Category is required"),
+  severity: z.string().min(1, "Severity is required"),
+  reporter_name: z.string().min(2, "Name must be at least 2 characters"),
+  reporter_email: z.string().email("Please enter a valid email"),
 });
 
 type ReportFormData = z.infer<typeof reportSchema>;
@@ -32,133 +31,106 @@ interface ReportFormProps {
 
 export const ReportForm = ({ onSuccess }: ReportFormProps) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isLocating, setIsLocating] = useState(false);
-  
-  const form = useForm<ReportFormData>({
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
+
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    watch,
+    formState: { errors },
+    reset,
+  } = useForm<ReportFormData>({
     resolver: zodResolver(reportSchema),
-    defaultValues: {
-      title: "",
-      description: "",
-      location: "",
-      category: "other",
-      severity: "medium",
-      reporter_name: "",
-      reporter_email: "",
-    }
   });
 
-  const getLocation = async () => {
-    if (!navigator.geolocation) {
-      toast({
-        title: "Geolocation not supported",
-        description: "Your browser doesn't support location services.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsLocating(true);
+  const getLocation = useCallback(async () => {
+    setLocationLoading(true);
     try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(
-          resolve, 
-          reject,
-          { 
-            enableHighAccuracy: true, 
-            timeout: 10000, 
-            maximumAge: 60000 
-          }
-        );
-      });
-      
-      form.setValue("latitude", position.coords.latitude);
-      form.setValue("longitude", position.coords.longitude);
-      
-      // Attempt to get human-readable address
-      try {
-        const response = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${position.coords.latitude}&lon=${position.coords.longitude}`,
-          { 
-            headers: {
-              'User-Agent': 'RouteReportApp/1.0'
-            }
-          }
-        );
-        
-        if (response.ok) {
-          const data = await response.json();
-          if (data.display_name) {
-            form.setValue("location", data.display_name);
-          }
-        }
-      } catch (geocodeError) {
-        console.warn("Geocoding failed:", geocodeError);
-        // Continue without geocoding - we still have coordinates
+      if (!navigator.geolocation) {
+        toast({
+          title: "Geolocation not supported",
+          description: "Please enter your location manually.",
+          variant: "destructive",
+        });
+        return;
       }
-      
-      toast({
-        title: "Location detected",
-        description: "Your current location has been added to the report.",
-      });
+
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const { latitude, longitude } = position.coords;
+          try {
+            const response = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
+            );
+            const data = await response.json();
+            const address = data.display_name;
+            setValue("location", address);
+            toast({
+              title: "Location detected",
+              description: "Your location has been automatically filled.",
+            });
+          } catch (error) {
+            console.error("Error getting address:", error);
+            toast({
+              title: "Location error",
+              description: "Could not get address. Please enter manually.",
+              variant: "destructive",
+            });
+          }
+        },
+        (error) => {
+          console.error("Geolocation error:", error);
+          toast({
+            title: "Location access denied",
+            description: "Please enter your location manually.",
+            variant: "destructive",
+          });
+        }
+      );
     } catch (error) {
       console.error("Error getting location:", error);
-      let errorMessage = "Please enter your location manually.";
-      
-      if (error instanceof GeolocationPositionError) {
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            errorMessage = "Location access denied. Please enable location services.";
-            break;
-          case error.POSITION_UNAVAILABLE:
-            errorMessage = "Location information unavailable.";
-            break;
-          case error.TIMEOUT:
-            errorMessage = "Location request timed out.";
-            break;
-        }
-      }
-      
       toast({
-        title: "Error detecting location",
-        description: errorMessage,
+        title: "Location error",
+        description: "Please enter your location manually.",
         variant: "destructive",
       });
     } finally {
-      setIsLocating(false);
+      setLocationLoading(false);
     }
-  };
+  }, [setValue]);
 
-  const onSubmit = async (data: ReportFormData) => {
+  const onSubmit = useCallback(async (data: ReportFormData) => {
     setIsSubmitting(true);
-
     try {
-      // Sanitize and prepare data for insertion
-      const reportData = {
-        title: data.title.trim(),
-        description: data.description.trim(),
-        location: data.location.trim(),
-        category: data.category,
-        severity: data.severity,
-        reporter_name: data.reporter_name?.trim() || null,
-        reporter_email: data.reporter_email?.trim() || null,
-        latitude: data.latitude || null,
-        longitude: data.longitude || null,
-        status: 'active' as const
-      };
-
-      const { error } = await supabase
-        .from("reports")
-        .insert([reportData]);
+      const { error } = await supabase.from("reports").insert([
+        {
+          title: data.title,
+          description: data.description,
+          location: data.location,
+          category: data.category,
+          severity: data.severity,
+          reporter_name: data.reporter_name,
+          reporter_email: data.reporter_email,
+          status: "active",
+          created_at: new Date().toISOString(),
+        },
+      ]);
 
       if (error) throw error;
 
+      setIsSuccess(true);
       toast({
         title: "Report submitted successfully!",
-        description: "Thank you for helping keep our roads safe.",
+        description: "Your report has been shared with the community.",
       });
 
-      form.reset();
-      onSuccess();
+      setTimeout(() => {
+        reset();
+        setIsSuccess(false);
+        onSuccess();
+      }, 2000);
     } catch (error) {
       console.error("Error submitting report:", error);
       toast({
@@ -169,157 +141,233 @@ export const ReportForm = ({ onSuccess }: ReportFormProps) => {
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [reset, onSuccess]);
+
+  if (isSuccess) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted/20">
+        <Card className="w-full max-w-md mx-4">
+          <CardContent className="pt-6 text-center">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 mb-6">
+              <CheckCircle className="w-8 h-8 text-green-600" />
+            </div>
+            <h2 className="text-2xl font-bold mb-4 text-green-600">Report Submitted!</h2>
+            <p className="text-muted-foreground mb-6">
+              Thank you for helping keep our community safe. Your report has been shared with other drivers.
+            </p>
+            <div className="flex items-center justify-center">
+              <Loader2 className="w-5 h-5 animate-spin mr-2" />
+              <span className="text-sm text-muted-foreground">Redirecting...</span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-2xl mx-auto p-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Submit Route Report</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="title">Title</Label>
-              <Input
-                {...form.register("title")}
-                id="title"
-                placeholder="Brief description of the incident"
-              />
-              {form.formState.errors.title && (
-                <p className="text-sm text-red-500">{form.formState.errors.title.message}</p>
-              )}
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 py-8">
+      <div className="container mx-auto px-4 max-w-2xl">
+        <Card className="shadow-xl border-0 bg-card/95 backdrop-blur-sm">
+          <CardHeader className="text-center pb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-primary to-accent mb-6 shadow-lg">
+              <AlertTriangle className="w-8 h-8 text-primary-foreground" />
             </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="category">Category</Label>
-              <Select
-                onValueChange={(value) => form.setValue("category", value as ReportFormData["category"])}
-                defaultValue={form.getValues("category")}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="accident">Accident</SelectItem>
-                  <SelectItem value="construction">Construction</SelectItem>
-                  <SelectItem value="weather">Weather</SelectItem>
-                  <SelectItem value="traffic">Traffic</SelectItem>
-                  <SelectItem value="road_damage">Road Damage</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-              {form.formState.errors.category && (
-                <p className="text-sm text-red-500">{form.formState.errors.category.message}</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="severity">Severity</Label>
-              <Select
-                onValueChange={(value) => form.setValue("severity", value as ReportFormData["severity"])}
-                defaultValue={form.getValues("severity")}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select severity" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Low - Minor inconvenience</SelectItem>
-                  <SelectItem value="medium">Medium - Moderate impact</SelectItem>
-                  <SelectItem value="high">High - Significant delays</SelectItem>
-                  <SelectItem value="critical">Critical - Dangerous conditions</SelectItem>
-                </SelectContent>
-              </Select>
-              {form.formState.errors.severity && (
-                <p className="text-sm text-red-500">{form.formState.errors.severity.message}</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="location">Location</Label>
-              <div className="flex gap-2">
+            <CardTitle className="text-3xl font-bold mb-2">Report Road Issue</CardTitle>
+            <p className="text-muted-foreground">
+              Help keep our community safe by reporting road conditions, accidents, or hazards.
+            </p>
+          </CardHeader>
+          
+          <CardContent className="space-y-6">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+              {/* Title */}
+              <div className="space-y-2">
+                <Label htmlFor="title">Issue Title *</Label>
                 <Input
-                  {...form.register("location")}
-                  id="location"
-                  placeholder="Enter location"
-                  className="flex-1"
+                  id="title"
+                  {...register("title")}
+                  placeholder="Brief description of the issue"
+                  aria-describedby="title-error"
+                  className={errors.title ? "border-destructive" : ""}
                 />
+                {errors.title && (
+                  <p id="title-error" className="text-sm text-destructive">
+                    {errors.title.message}
+                  </p>
+                )}
+              </div>
+
+              {/* Description */}
+              <div className="space-y-2">
+                <Label htmlFor="description">Detailed Description *</Label>
+                <Textarea
+                  id="description"
+                  {...register("description")}
+                  placeholder="Provide detailed information about the issue, including any relevant details that could help other drivers"
+                  rows={4}
+                  aria-describedby="description-error"
+                  className={errors.description ? "border-destructive" : ""}
+                />
+                {errors.description && (
+                  <p id="description-error" className="text-sm text-destructive">
+                    {errors.description.message}
+                  </p>
+                )}
+              </div>
+
+              {/* Location */}
+              <div className="space-y-2">
+                <Label htmlFor="location">Location *</Label>
+                <div className="flex space-x-2">
+                  <Input
+                    id="location"
+                    {...register("location")}
+                    placeholder="Street address or intersection"
+                    aria-describedby="location-error"
+                    className={errors.location ? "border-destructive" : ""}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={getLocation}
+                    disabled={locationLoading}
+                    className="shrink-0"
+                    aria-label="Get current location"
+                  >
+                    {locationLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <MapPin className="w-4 h-4" />
+                    )}
+                  </Button>
+                </div>
+                {errors.location && (
+                  <p id="location-error" className="text-sm text-destructive">
+                    {errors.location.message}
+                  </p>
+                )}
+              </div>
+
+              {/* Category and Severity */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="category">Category *</Label>
+                  <Select onValueChange={(value) => setValue("category", value)}>
+                    <SelectTrigger id="category" className={errors.category ? "border-destructive" : ""}>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="accident">Accident</SelectItem>
+                      <SelectItem value="construction">Construction</SelectItem>
+                      <SelectItem value="weather">Weather Condition</SelectItem>
+                      <SelectItem value="traffic">Traffic Jam</SelectItem>
+                      <SelectItem value="hazard">Road Hazard</SelectItem>
+                      <SelectItem value="maintenance">Road Maintenance</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {errors.category && (
+                    <p className="text-sm text-destructive">{errors.category.message}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="severity">Severity *</Label>
+                  <Select onValueChange={(value) => setValue("severity", value)}>
+                    <SelectTrigger id="severity" className={errors.severity ? "border-destructive" : ""}>
+                      <SelectValue placeholder="Select severity" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="critical">Critical</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {errors.severity && (
+                    <p className="text-sm text-destructive">{errors.severity.message}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Reporter Information */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="reporter_name">Your Name *</Label>
+                  <Input
+                    id="reporter_name"
+                    {...register("reporter_name")}
+                    placeholder="Your full name"
+                    aria-describedby="reporter_name-error"
+                    className={errors.reporter_name ? "border-destructive" : ""}
+                  />
+                  {errors.reporter_name && (
+                    <p id="reporter_name-error" className="text-sm text-destructive">
+                      {errors.reporter_name.message}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="reporter_email">Email *</Label>
+                  <Input
+                    id="reporter_email"
+                    type="email"
+                    {...register("reporter_email")}
+                    placeholder="your.email@example.com"
+                    aria-describedby="reporter_email-error"
+                    className={errors.reporter_email ? "border-destructive" : ""}
+                  />
+                  {errors.reporter_email && (
+                    <p id="reporter_email-error" className="text-sm text-destructive">
+                      {errors.reporter_email.message}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Submit Button */}
+              <div className="flex flex-col sm:flex-row gap-4 pt-4">
+                <Button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex-1 bg-gradient-to-r from-primary to-accent hover:shadow-lg transition-all duration-300"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    <>
+                      <AlertTriangle className="w-4 h-4 mr-2" />
+                      Submit Report
+                    </>
+                  )}
+                </Button>
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-10 px-0"
-                  onClick={getLocation}
-                  disabled={isLocating}
+                  onClick={() => window.history.back()}
+                  className="flex items-center"
                 >
-                  {isLocating ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <MapPin className="h-4 w-4" />
-                  )}
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Back
                 </Button>
               </div>
-              {form.formState.errors.location && (
-                <p className="text-sm text-red-500">{form.formState.errors.location.message}</p>
-              )}
-            </div>
+            </form>
 
-            <div className="space-y-2">
-              <Label htmlFor="description">Description</Label>
-              <Textarea
-                {...form.register("description")}
-                id="description"
-                placeholder="Detailed description of the incident"
-                className="min-h-[100px]"
-              />
-              {form.formState.errors.description && (
-                <p className="text-sm text-red-500">{form.formState.errors.description.message}</p>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="reporter_name">Your Name</Label>
-                <Input
-                  {...form.register("reporter_name")}
-                  id="reporter_name"
-                  placeholder="Enter your name"
-                />
-                {form.formState.errors.reporter_name && (
-                  <p className="text-sm text-red-500">{form.formState.errors.reporter_name.message}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="reporter_email">Your Email</Label>
-                <Input
-                  {...form.register("reporter_email")}
-                  id="reporter_email"
-                  type="email"
-                  placeholder="Enter your email"
-                />
-                {form.formState.errors.reporter_email && (
-                  <p className="text-sm text-red-500">{form.formState.errors.reporter_email.message}</p>
-                )}
-              </div>
-            </div>
-
-            <Button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full bg-gradient-to-r from-primary to-accent hover:shadow-lg transition-all duration-300"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Submitting...
-                </>
-              ) : (
-                "Submit Report"
-              )}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+            {/* Info Alert */}
+            <Alert className="border-blue-200 bg-blue-50/50">
+              <AlertTriangle className="h-4 w-4 text-blue-600" />
+              <AlertDescription className="text-blue-800">
+                Your report will be immediately shared with the community and emergency services if needed. 
+                All information is kept confidential and used only for safety purposes.
+              </AlertDescription>
+            </Alert>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 };
