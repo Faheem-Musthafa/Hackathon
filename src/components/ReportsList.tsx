@@ -81,8 +81,9 @@ export const ReportsList = ({ onViewChange }: ReportsListProps) => {
 
   // Set up real-time subscription
   useEffect(() => {
+    const channelName = 'reports-list-realtime';
     const channel = supabase
-      .channel('reports-realtime')
+      .channel(channelName)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',

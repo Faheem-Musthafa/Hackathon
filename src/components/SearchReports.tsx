@@ -51,7 +51,12 @@ export const SearchReports = () => {
       // Apply search filter
       if (searchTerm.trim()) {
         const searchValue = searchTerm.trim();
-        query = query.or(`title.ilike.%${searchValue}%,description.ilike.%${searchValue}%,location.ilike.%${searchValue}%`);
+        // Use individual ilike filters instead of string concatenation for security
+        query = query.or(
+          `title.ilike.%${searchValue}%`,
+          `description.ilike.%${searchValue}%`,
+          `location.ilike.%${searchValue}%`
+        );
       }
 
       // Apply category filter
