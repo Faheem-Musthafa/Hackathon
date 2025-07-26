@@ -145,8 +145,9 @@ export const useReports = (options: UseReportsOptions = {}) => {
 
   // Set up real-time subscription
   useEffect(() => {
+    const channelName = `reports-realtime-${options.status || 'active'}`;
     const channel = supabase
-      .channel('reports-realtime')
+      .channel(channelName)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',

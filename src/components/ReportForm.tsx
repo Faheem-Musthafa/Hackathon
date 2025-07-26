@@ -46,6 +46,11 @@ export const ReportForm = ({ onSuccess }: ReportFormProps) => {
   });
 
   const getLocation = useCallback(async () => {
+    // Prevent multiple simultaneous location requests
+    if (locationLoading) {
+      return;
+    }
+    
     setLocationLoading(true);
     try {
       if (!navigator.geolocation) {
@@ -57,49 +62,87 @@ export const ReportForm = ({ onSuccess }: ReportFormProps) => {
         return;
       }
 
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const { latitude, longitude } = position.coords;
-          try {
-            const response = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
-            );
-            const data = await response.json();
-            const address = data.display_name;
-            setValue("location", address);
-            toast({
-              title: "Location detected",
-              description: "Your location has been automatically filled.",
-            });
-          } catch (error) {
-            console.error("Error getting address:", error);
-            toast({
-              title: "Location error",
-              description: "Could not get address. Please enter manually.",
-              variant: "destructive",
-            });
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error('Geolocation request timed out'));
+        }, 10000); // 10 second timeout
+
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            clearTimeout(timeoutId);
+            resolve(position);
+          },
+          (error) => {
+            clearTimeout(timeoutId);
+            reject(error);
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 60000
           }
-        },
-        (error) => {
-          console.error("Geolocation error:", error);
-          toast({
-            title: "Location access denied",
-            description: "Please enter your location manually.",
-            variant: "destructive",
-          });
+        );
+      });
+
+      const { latitude, longitude } = position.coords;
+      
+      // Add timeout for the reverse geocoding request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      
+      try {
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,
+          { signal: controller.signal }
+        );
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
-      );
+        
+        const data = await response.json();
+        const address = data.display_name;
+        setValue("location", address);
+        toast({
+          title: "Location detected",
+          description: "Your location has been automatically filled.",
+        });
+      } catch (error) {
+        console.error("Error getting address:", error);
+        toast({
+          title: "Location error",
+          description: "Could not get address. Please enter manually.",
+          variant: "destructive",
+        });
+      }
     } catch (error) {
       console.error("Error getting location:", error);
-      toast({
-        title: "Location error",
-        description: "Please enter your location manually.",
-        variant: "destructive",
-      });
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      if (errorMessage.includes('timeout')) {
+        toast({
+          title: "Location timeout",
+          description: "Location request timed out. Please try again or enter manually.",
+          variant: "destructive",
+        });
+      } else if (errorMessage.includes('denied')) {
+        toast({
+          title: "Location access denied",
+          description: "Please enable location services or enter your location manually.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Location error",
+          description: "Please enter your location manually.",
+          variant: "destructive",
+        });
+      }
     } finally {
       setLocationLoading(false);
     }
-  }, [setValue]);
+  }, [setValue, locationLoading]);
 
   const onSubmit = useCallback(async (data: ReportFormData) => {
     setIsSubmitting(true);
