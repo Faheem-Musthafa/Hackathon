@@ -12,6 +12,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { MapPin, AlertTriangle, Loader2, CheckCircle, ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { sanitizeFormData } from "@/lib/sanitize";
 
 const reportSchema = z.object({
   title: z.string().min(5, "Title must be at least 5 characters"),
@@ -147,15 +148,18 @@ export const ReportForm = ({ onSuccess }: ReportFormProps) => {
   const onSubmit = useCallback(async (data: ReportFormData) => {
     setIsSubmitting(true);
     try {
+      // Sanitize all form data before submission
+      const sanitizedData = sanitizeFormData(data);
+
       const { error } = await supabase.from("reports").insert([
         {
-          title: data.title,
-          description: data.description,
-          location: data.location,
-          category: data.category,
-          severity: data.severity,
-          reporter_name: data.reporter_name,
-          reporter_email: data.reporter_email,
+          title: sanitizedData.title,
+          description: sanitizedData.description,
+          location: sanitizedData.location,
+          category: sanitizedData.category,
+          severity: sanitizedData.severity,
+          reporter_name: sanitizedData.reporter_name,
+          reporter_email: sanitizedData.reporter_email,
           status: "active",
           created_at: new Date().toISOString(),
         },
@@ -209,16 +213,28 @@ export const ReportForm = ({ onSuccess }: ReportFormProps) => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 py-8">
-      <div className="container mx-auto px-4 max-w-2xl">
-        <Card className="shadow-xl border-0 bg-card/95 backdrop-blur-sm">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-orange-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 py-8 relative overflow-hidden">
+      {/* Enhanced Background Elements */}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.05),transparent_50%)]"></div>
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_80%,rgba(251,146,60,0.05),transparent_50%)]"></div>
+
+      {/* Animated Background Elements */}
+      <div className="absolute top-20 left-10 w-72 h-72 bg-gradient-to-r from-red-400/10 to-orange-400/10 rounded-full blur-3xl animate-pulse"></div>
+      <div className="absolute bottom-20 right-10 w-96 h-96 bg-gradient-to-r from-blue-400/10 to-purple-400/10 rounded-full blur-3xl animate-pulse delay-1000"></div>
+
+      <div className="container mx-auto px-4 max-w-3xl relative z-10">
+        <Card className="shadow-2xl border-0 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl">
           <CardHeader className="text-center pb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-primary to-accent mb-6 shadow-lg">
-              <AlertTriangle className="w-8 h-8 text-primary-foreground" />
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-gradient-to-br from-red-500 via-orange-500 to-yellow-500 mb-8 shadow-2xl relative overflow-hidden group">
+              <div className="absolute inset-0 bg-white/20 rounded-3xl blur-xl group-hover:blur-2xl transition-all duration-300"></div>
+              <AlertTriangle className="w-10 h-10 text-white relative z-10 group-hover:scale-110 transition-transform duration-300" />
             </div>
-            <CardTitle className="text-3xl font-bold mb-2">Report Road Issue</CardTitle>
-            <p className="text-muted-foreground">
+            <CardTitle className="text-4xl font-black mb-4 bg-gradient-to-r from-red-600 via-orange-600 to-yellow-500 bg-clip-text text-transparent">
+              Report Road Issue
+            </CardTitle>
+            <p className="text-xl text-gray-600 dark:text-gray-300 leading-relaxed max-w-2xl mx-auto">
               Help keep our community safe by reporting road conditions, accidents, or hazards.
+              Your report helps other drivers stay informed and authorities respond quickly.
             </p>
           </CardHeader>
           

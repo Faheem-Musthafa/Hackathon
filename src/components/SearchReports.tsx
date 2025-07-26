@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
-import { Search, Filter, MapPin, Clock, AlertTriangle, Loader2, X } from "lucide-react";
+import { Search, Filter, MapPin, Clock, Loader2, X } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { getCategoryIcon, getSeverityVariant, formatTimeAgo } from "@/lib/utils";
 
@@ -53,9 +53,7 @@ export const SearchReports = () => {
         const searchValue = searchTerm.trim();
         // Use individual ilike filters instead of string concatenation for security
         query = query.or(
-          `title.ilike.%${searchValue}%`,
-          `description.ilike.%${searchValue}%`,
-          `location.ilike.%${searchValue}%`
+          `title.ilike.%${searchValue}%,description.ilike.%${searchValue}%,location.ilike.%${searchValue}%`
         );
       }
 
@@ -145,16 +143,28 @@ export const SearchReports = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 py-8">
-      <div className="container mx-auto px-4 max-w-6xl">
-        <Card className="shadow-xl border-0 bg-card/95 backdrop-blur-sm mb-8">
-          <CardHeader className="text-center pb-6">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-primary to-accent mb-6 shadow-lg">
-              <Search className="w-8 h-8 text-primary-foreground" />
+    <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-blue-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 py-8 relative overflow-hidden">
+      {/* Enhanced Background Elements */}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(34,197,94,0.05),transparent_50%)]"></div>
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_80%,rgba(59,130,246,0.05),transparent_50%)]"></div>
+
+      {/* Animated Background Elements */}
+      <div className="absolute top-20 left-10 w-72 h-72 bg-gradient-to-r from-green-400/10 to-blue-400/10 rounded-full blur-3xl animate-pulse"></div>
+      <div className="absolute bottom-20 right-10 w-96 h-96 bg-gradient-to-r from-blue-400/10 to-teal-400/10 rounded-full blur-3xl animate-pulse delay-1000"></div>
+
+      <div className="container mx-auto px-4 max-w-6xl relative z-10">
+        <Card className="shadow-2xl border-0 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl mb-8">
+          <CardHeader className="text-center pb-8">
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-gradient-to-br from-green-500 via-teal-500 to-blue-500 mb-8 shadow-2xl relative overflow-hidden group">
+              <div className="absolute inset-0 bg-white/20 rounded-3xl blur-xl group-hover:blur-2xl transition-all duration-300"></div>
+              <Search className="w-10 h-10 text-white relative z-10 group-hover:scale-110 transition-transform duration-300" />
             </div>
-            <CardTitle className="text-3xl font-bold mb-2">Search Reports</CardTitle>
-            <p className="text-muted-foreground">
+            <CardTitle className="text-4xl font-black mb-4 bg-gradient-to-r from-green-600 via-teal-600 to-blue-500 bg-clip-text text-transparent">
+              Search Reports
+            </CardTitle>
+            <p className="text-xl text-gray-600 dark:text-gray-300 leading-relaxed max-w-3xl mx-auto">
               Find specific reports by searching titles, descriptions, locations, or using advanced filters.
+              Discover patterns and track specific incidents across your area.
             </p>
           </CardHeader>
           

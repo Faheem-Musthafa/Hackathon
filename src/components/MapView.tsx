@@ -2,22 +2,31 @@ import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
-import { MapPin, Navigation, Loader2, RefreshCw, Calendar, AlertTriangle, Globe } from "lucide-react";
+import { MapPin, Navigation, Loader2, RefreshCw, Calendar, AlertTriangle, Globe, TrendingUp, Clock } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { getCategoryIcon, getSeverityColor, getCategoryColor, formatDate, calculateDistance, openInMaps } from "@/lib/utils";
 import { ReportsMap } from "./ReportsMap";
+import { SimpleMap } from "./SimpleMap";
+import type { Database } from "@/integrations/supabase/types";
 
-interface Report {
-  id: string;
-  title: string;
-  description: string;
-  location: string;
-  category: string;
-  severity: string;
-  latitude: number | null;
-  longitude: number | null;
-  created_at: string;
+// Use the proper Supabase type
+type Report = Database['public']['Tables']['reports']['Row'];
+
+interface MapStats {
+  totalReports: number;
+  reportsWithLocation: number;
+  severityBreakdown: {
+    low: number;
+    medium: number;
+    high: number;
+    critical: number;
+  };
+  categoryBreakdown: {
+    [key: string]: number;
+  };
+  recentReports: number; // Reports from last 24 hours
 }
 
 export const MapView = () => {
@@ -26,22 +35,78 @@ export const MapView = () => {
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [stats, setStats] = useState<MapStats | null>(null);
+  const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
 
   const fetchReports = useCallback(async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      console.log('🔄 Fetching reports from Supabase...');
+
+      // Fetch all active reports (including those without location for stats)
+      const { data: allReports, error: allError } = await supabase
         .from('reports')
         .select('*')
         .eq('status', 'active')
-        .not('latitude', 'is', null)
-        .not('longitude', 'is', null)
         .order('created_at', { ascending: false });
-      
-      if (error) throw error;
-      setReports(data || []);
+
+      if (allError) throw allError;
+
+      // Filter reports with location for map display
+      const reportsWithLocation = (allReports || []).filter(
+        report => report.latitude !== null && report.longitude !== null
+      );
+
+      setReports(reportsWithLocation);
+      setLastFetchTime(new Date());
+
+      // Calculate statistics
+      const now = new Date();
+      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+      const severityBreakdown = {
+        low: 0,
+        medium: 0,
+        high: 0,
+        critical: 0
+      };
+
+      const categoryBreakdown: { [key: string]: number } = {};
+      let recentReports = 0;
+
+      (allReports || []).forEach(report => {
+        // Count severity
+        if (report.severity in severityBreakdown) {
+          severityBreakdown[report.severity as keyof typeof severityBreakdown]++;
+        }
+
+        // Count categories
+        categoryBreakdown[report.category] = (categoryBreakdown[report.category] || 0) + 1;
+
+        // Count recent reports
+        if (new Date(report.created_at) > yesterday) {
+          recentReports++;
+        }
+      });
+
+      const calculatedStats: MapStats = {
+        totalReports: allReports?.length || 0,
+        reportsWithLocation: reportsWithLocation.length,
+        severityBreakdown,
+        categoryBreakdown,
+        recentReports
+      };
+
+      setStats(calculatedStats);
+
+      console.log('✅ Successfully fetched reports:', {
+        total: calculatedStats.totalReports,
+        withLocation: calculatedStats.reportsWithLocation,
+        recent: calculatedStats.recentReports
+      });
+
     } catch (error) {
-      console.error('Error fetching reports:', error);
+      console.error('❌ Error fetching reports:', error);
       toast({
         title: "Error loading map data",
         description: "Please try again later.",
@@ -53,7 +118,11 @@ export const MapView = () => {
   }, []);
 
   const getUserLocation = useCallback(async () => {
+    console.log('🎯 Get Location button clicked - requesting REAL user location');
+
+    // Check if geolocation is supported
     if (!navigator.geolocation) {
+      console.log('❌ Geolocation not supported in this browser');
       toast({
         title: "Location not supported",
         description: "Your browser doesn't support location services.",
@@ -62,31 +131,101 @@ export const MapView = () => {
       return;
     }
 
-    setLocationLoading(true);
-    try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 60000
-        });
+    // Check if we're on HTTPS (required for geolocation in most browsers)
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+      console.log('⚠️ Not on HTTPS - geolocation may not work');
+      toast({
+        title: "HTTPS Required",
+        description: "Location services require a secure connection (HTTPS).",
+        variant: "destructive",
       });
-      
+      return;
+    }
+
+    console.log('🔄 Starting real location request...');
+    setLocationLoading(true);
+
+    try {
+      // Request the user's actual current position
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        console.log('📡 Calling navigator.geolocation.getCurrentPosition...');
+
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            console.log('✅ Real location obtained successfully:', {
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+              accuracy: pos.coords.accuracy,
+              timestamp: new Date(pos.timestamp).toLocaleString()
+            });
+            resolve(pos);
+          },
+          (err) => {
+            console.log('❌ Geolocation error:', {
+              code: err.code,
+              message: err.message,
+              PERMISSION_DENIED: err.code === 1,
+              POSITION_UNAVAILABLE: err.code === 2,
+              TIMEOUT: err.code === 3
+            });
+            reject(err);
+          },
+          {
+            enableHighAccuracy: true, // Use GPS if available
+            timeout: 20000, // 20 second timeout
+            maximumAge: 60000 // Accept cached position up to 1 minute old
+          }
+        );
+      });
+
+      // Extract the real coordinates
       const userLoc = {
         lat: position.coords.latitude,
         lng: position.coords.longitude
       };
+
+      console.log('📍 Setting REAL user location:', userLoc);
+      console.log('🎯 Accuracy:', position.coords.accuracy, 'meters');
+
       setUserLocation(userLoc);
-      
+
+      // Update the map to center on user's location with appropriate zoom
+      // This will be handled by the SimpleMap component when userLocation changes
+
       toast({
-        title: "Location detected",
-        description: "Your location has been set for distance calculations.",
+        title: "Your location detected!",
+        description: `Map centered on your location (±${Math.round(position.coords.accuracy)}m accuracy)`,
       });
-    } catch (error) {
-      console.error('Error getting user location:', error);
+
+    } catch (error: unknown) {
+      console.error('❌ Error getting real user location:', error);
+
+      let errorMessage = "Unable to get your current location.";
+      let errorTitle = "Location Error";
+
+      // Handle specific geolocation errors
+      if (error && typeof error === 'object' && 'code' in error) {
+        const geoError = error as GeolocationPositionError;
+        console.log('🔍 Geolocation error details:', {
+          code: geoError.code,
+          message: geoError.message
+        });
+
+        if (geoError.code === 1) {
+          errorTitle = "Permission Denied";
+          errorMessage = "Please allow location access when prompted by your browser, or check your browser's location settings.";
+        } else if (geoError.code === 2) {
+          errorTitle = "Location Unavailable";
+          errorMessage = "Your device's location could not be determined. Make sure location services are enabled.";
+        } else if (geoError.code === 3) {
+          errorTitle = "Request Timeout";
+          errorMessage = "Location request timed out. Please try again or check your internet connection.";
+        }
+      }
+
       toast({
-        title: "Location access denied",
-        description: "Please enable location services to see distances to reports.",
+        title: errorTitle,
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -153,12 +292,45 @@ export const MapView = () => {
     }
   };
 
-  const refreshData = () => {
-    fetchReports();
+  const refreshData = useCallback(async () => {
+    console.log('🔄 Manual refresh triggered');
+    await fetchReports();
     if (!userLocation) {
       getUserLocation();
     }
-  };
+    toast({
+      title: "Data refreshed",
+      description: "Map data has been updated successfully.",
+    });
+  }, [fetchReports, getUserLocation, userLocation]);
+
+
+
+
+
+
+
+  // Function to center map on user location (for re-centering)
+  const centerOnUser = useCallback(() => {
+    if (!userLocation) {
+      toast({
+        title: "No location set",
+        description: "Please get your location first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    console.log('🎯 Re-centering map on user location');
+    toast({
+      title: "Map centered",
+      description: "Map view centered on your location.",
+    });
+
+    // The SimpleMap component will handle the actual centering via the userLocation prop
+    // We can trigger a re-render by updating the userLocation state
+    setUserLocation({ ...userLocation });
+  }, [userLocation]);
 
   if (loading) {
     return (
@@ -181,21 +353,41 @@ export const MapView = () => {
             <p className="text-muted-foreground mt-2">View reports with location data and get directions</p>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Button 
-              onClick={getUserLocation} 
-              variant="outline"
+            <Button
+              onClick={getUserLocation}
+              variant={userLocation ? "default" : "outline"}
               disabled={locationLoading}
-              className="flex items-center gap-2"
+              className={`flex items-center gap-2 ${userLocation ? 'bg-green-600 hover:bg-green-700' : ''}`}
             >
               {locationLoading ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
-                <Navigation className="w-4 h-4" />
+                <Navigation className={`w-4 h-4 ${userLocation ? 'text-white' : ''}`} />
               )}
-              {userLocation ? 'Update Location' : 'Get My Location'}
+              {userLocation ? 'Location Set ✓' : 'Get My Location'}
             </Button>
-            <Button 
-              onClick={refreshData} 
+
+            {userLocation && (
+              <>
+                <Button
+                  onClick={centerOnUser}
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-2"
+                >
+                  <Globe className="w-3 h-3" />
+                  Center on Me
+                </Button>
+                <Badge variant="secondary" className="flex items-center gap-1 px-3 py-1">
+                  <MapPin className="w-3 h-3" />
+                  <span className="text-xs">
+                    {userLocation.lat.toFixed(4)}, {userLocation.lng.toFixed(4)}
+                  </span>
+                </Badge>
+              </>
+            )}
+            <Button
+              onClick={refreshData}
               variant="outline"
               className="flex items-center gap-2"
             >
@@ -204,6 +396,61 @@ export const MapView = () => {
             </Button>
           </div>
         </div>
+
+        {/* Statistics Dashboard */}
+        {stats && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <Card className="bg-gradient-to-r from-blue-50 to-blue-100 border-blue-200">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-blue-600">Total Reports</p>
+                    <p className="text-2xl font-bold text-blue-900">{stats.totalReports}</p>
+                  </div>
+                  <TrendingUp className="w-8 h-8 text-blue-500" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-gradient-to-r from-green-50 to-green-100 border-green-200">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-green-600">With Location</p>
+                    <p className="text-2xl font-bold text-green-900">{stats.reportsWithLocation}</p>
+                  </div>
+                  <MapPin className="w-8 h-8 text-green-500" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-gradient-to-r from-orange-50 to-orange-100 border-orange-200">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-orange-600">Last 24 Hours</p>
+                    <p className="text-2xl font-bold text-orange-900">{stats.recentReports}</p>
+                  </div>
+                  <Clock className="w-8 h-8 text-orange-500" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-gradient-to-r from-purple-50 to-purple-100 border-purple-200">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-purple-600">Coverage</p>
+                    <p className="text-2xl font-bold text-purple-900">
+                      {stats.totalReports > 0 ? Math.round((stats.reportsWithLocation / stats.totalReports) * 100) : 0}%
+                    </p>
+                  </div>
+                  <TrendingUp className="w-8 h-8 text-purple-500" />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Map Integration */}
@@ -216,18 +463,55 @@ export const MapView = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="h-[calc(100%-56px)] p-0 relative">
-                <ReportsMap reports={reports} />
+                <SimpleMap reports={reports} height="100%" userLocation={userLocation} />
               </CardContent>
             </Card>
           </div>
-          {/* Reports List (unchanged) */}
+          {/* Enhanced Reports List */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold">Reports with Location</h2>
-              <Badge variant="secondary" className="text-sm">
-                {reports.length} reports
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="text-sm">
+                  {reports.length} reports
+                </Badge>
+                {lastFetchTime && (
+                  <Badge variant="outline" className="text-xs">
+                    Updated {lastFetchTime.toLocaleTimeString()}
+                  </Badge>
+                )}
+              </div>
             </div>
+
+            {/* Severity Breakdown */}
+            {stats && (
+              <Card className="mb-4">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium">Severity Distribution</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {Object.entries(stats.severityBreakdown).map(([severity, count]) => {
+                    const percentage = stats.totalReports > 0 ? (count / stats.totalReports) * 100 : 0;
+                    const colorClass = severity === 'critical' ? 'bg-red-500' :
+                                     severity === 'high' ? 'bg-orange-500' :
+                                     severity === 'medium' ? 'bg-yellow-500' : 'bg-green-500';
+
+                    return (
+                      <div key={severity} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-3 h-3 rounded-full ${colorClass}`}></div>
+                          <span className="capitalize">{severity}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Progress value={percentage} className="w-16 h-2" />
+                          <span className="text-xs text-gray-500 w-8">{count}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+            )}
             <div className="max-h-[600px] overflow-y-auto space-y-3 pr-2">
               {reports.length > 0 ? (
                 reports.map((report) => {
